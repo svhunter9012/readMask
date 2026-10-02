@@ -12,7 +12,7 @@ In follow-pointer mode, the clear area moves with your reading position:
 
 ## Get started
 
-This repository currently provides source builds, not a prebuilt app. Building requires macOS, Python 3.9 or newer, and Xcode Command Line Tools for `clang`.
+This repository currently provides source builds, not a prebuilt app. Building requires macOS, Python 3.9 or newer, and Xcode Command Line Tools for `clang`. On Apple Silicon, use an arm64 Python and PyInstaller to build a native arm64 app.
 
 ```sh
 python3 -m venv .venv
@@ -21,7 +21,7 @@ python3 -m pip install -r requirements.txt pyinstaller
 ./build.sh
 ```
 
-The app will be at `dist/ReadMask.app` on your Mac. Open it from Finder; no terminal window will appear. ReadMask appears in both the Dock and menu bar. Click either icon to open settings.
+The app will be at `dist/ReadMask.app` on your Mac. Open it from Finder; no terminal window will appear. Settings opens on first launch. After that, click the Dock or menu bar icon to open it again. Source and app builds share the same settings.
 
 ## Reading modes
 
@@ -29,7 +29,7 @@ The app will be at `dist/ReadMask.app` on your Mac. Open it from Finder; no term
 - **Stay in place:** Turn off following, then drag the handle below the clear area to move it or drag the bottom-right handle to resize it.
 - **Adjust the view:** Change the clear area's size, mask depth, and each handle's size and transparency in settings. In fixed mode, the slider below the clear area also adjusts mask depth.
 
-Use the language menu at the bottom of settings to switch between Chinese and English. Your choice and other changes are saved automatically. Closing the settings window does not quit ReadMask; use its Quit button to exit.
+Settings has Reading, Handles, and Shortcuts tabs. The initial language follows macOS; use the language menu at the bottom to switch between Chinese and English. Your choice and other changes are saved automatically. Closing the settings window does not quit ReadMask; use its Quit button to exit.
 
 ## Keyboard shortcuts
 
@@ -41,7 +41,7 @@ Hold the first three keys, then press the last one:
 | <kbd>Control ⌃</kbd> + <kbd>Option ⌥</kbd> + <kbd>Command ⌘</kbd> + <kbd>]</kbd> | Toggle pointer following |
 | <kbd>Control ⌃</kbd> + <kbd>Option ⌥</kbd> + <kbd>Command ⌘</kbd> + <kbd>&#92;</kbd> | Move the clear area to the pointer |
 
-The shortcuts also appear in settings. If another app already uses one of these combinations, ReadMask may be unable to register its shortcuts and start.
+In the Shortcuts tab, click a shortcut button and press a new combination to change it. Esc cancels, Delete clears it, and the reset button restores all defaults. If a shortcut cannot be registered, that item is marked in settings while the rest of the app remains usable.
 
 ## Run from source
 
@@ -52,6 +52,8 @@ python3 readmask.py
 ```
 
 You can also use the virtual environment created above. If the macOS system Python includes PyObjC, `/usr/bin/python3 readmask.py` works as well.
+
+The local `build.sh` app is ad hoc signed for local use. Distribution requires Developer ID signing and Apple notarization; see the [release guide](docs/releasing.md).
 
 ## Development check
 

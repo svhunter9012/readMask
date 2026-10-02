@@ -11,6 +11,7 @@ from AppKit import (
     NSApplicationDidChangeScreenParametersNotification,
     NSBackingStoreBuffered,
     NSBezierPath,
+    NSBundle,
     NSButton,
     NSColor,
     NSControlStateValueOn,
@@ -19,6 +20,7 @@ from AppKit import (
     NSFloatingWindowLevel,
     NSGradient,
     NSImage,
+    NSLocale,
     NSNotificationCenter,
     NSObject,
     NSPanel,
@@ -27,6 +29,8 @@ from AppKit import (
     NSSlider,
     NSStatusBar,
     NSSwitchButton,
+    NSTabView,
+    NSTabViewItem,
     NSTextField,
     NSTimer,
     NSTrackingActiveAlways,
@@ -37,6 +41,11 @@ from AppKit import (
     NSView,
     NSWindow,
     NSUserDefaults,
+    NSEventMaskKeyDown,
+    NSEventModifierFlagCommand,
+    NSEventModifierFlagControl,
+    NSEventModifierFlagOption,
+    NSEventModifierFlagShift,
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowCollectionBehaviorStationary,
@@ -53,6 +62,23 @@ MOVE_ANCHOR_ASPECT = 2.5
 MIN_HEIGHT_RATIO = 0.05
 FLOATING_OPACITY_WIDTH = 164
 FLOATING_OPACITY_HEIGHT = 36
+PREFERENCES_DOMAIN = "app.readmask.desktop"
+LEGACY_SOURCE_DOMAIN = "com.apple.python3"
+PREFERENCE_KEYS = (
+    "enabled", "followsMouse", "fixedPoint", "widthRatio", "heightRatio",
+    "focusHeight", "opacity", "language", "moveAnchorSize",
+    "moveAnchorTransparency", "resizeAnchorSize", "resizeAnchorTransparency",
+)
+COMMAND = 1 << 8
+SHIFT = 1 << 9
+OPTION = 1 << 11
+CONTROL = 1 << 12
+DEFAULT_SHORTCUTS = {
+    1: (0x21, CONTROL | OPTION | COMMAND, "["),
+    2: (0x1E, CONTROL | OPTION | COMMAND, "]"),
+    3: (0x2A, CONTROL | OPTION | COMMAND, "\\"),
+}
+SHORTCUT_ACTIONS = {1: "enabled", 2: "follow", 3: "move"}
 
 UI_TEXT = {
     "zh": {
@@ -72,7 +98,17 @@ UI_TEXT = {
         "quit": "退出",
         "move_tooltip": "拖动阅读区",
         "resize_tooltip": "拖动调整阅读区大小",
-        "started": "阅读尺已启动，点击菜单栏图标打开设置。",
+        "started": "阅读尺已启动。",
+        "reading_tab": "阅读",
+        "handles_tab": "锚点",
+        "shortcuts_tab": "快捷键",
+        "shortcut_record": "按下快捷键…",
+        "shortcut_invalid": "请同时按修饰键和其他按键；Esc 取消，Delete 清除。",
+        "shortcut_duplicate": "这个快捷键已用于另一项操作。",
+        "shortcut_unavailable": "无法注册：{keys}。请检查是否与其他应用冲突。",
+        "shortcut_reset": "恢复默认快捷键",
+        "shortcut_none": "未设置",
+        "shortcut_record_tooltip": "点击后按下新的快捷键",
     },
     "en": {
         "app_name": "ReadMask",
@@ -91,7 +127,17 @@ UI_TEXT = {
         "quit": "Quit",
         "move_tooltip": "Drag focus area",
         "resize_tooltip": "Drag to resize focus area",
-        "started": "ReadMask is running. Click the menu bar icon to open settings.",
+        "started": "ReadMask is running.",
+        "reading_tab": "Reading",
+        "handles_tab": "Handles",
+        "shortcuts_tab": "Shortcuts",
+        "shortcut_record": "Press shortcut…",
+        "shortcut_invalid": "Use a modifier and another key. Esc cancels; Delete clears.",
+        "shortcut_duplicate": "This shortcut is already assigned to another action.",
+        "shortcut_unavailable": "Could not register: {keys}. Check for conflicts with other apps.",
+        "shortcut_reset": "Restore default shortcuts",
+        "shortcut_none": "None",
+        "shortcut_record_tooltip": "Click, then press a new keyboard shortcut",
     },
 }
 
@@ -102,6 +148,69 @@ def rect(x, y, width, height):
 
 def anchor_dimensions(kind, size):
     return (size * MOVE_ANCHOR_ASPECT, size) if kind == "move" else (size, size)
+
+
+def preferred_ui_language(languages):
+    return "zh" if languages and languages[0].lower().startswith("zh") else "en"
+
+
+def has_saved_preferences(defaults):
+    return (defaults.objectForKey_("hasLaunched") is not None
+            or any(defaults.objectForKey_(key) is not None for key in PREFERENCE_KEYS))
+
+
+def migrate_legacy_preferences(defaults, legacy):
+    if has_saved_preferences(defaults):
+        return False
+    copied = False
+    for key in PREFERENCE_KEYS:
+        if key in legacy:
+            defaults.setObject_forKey_(legacy[key], key)
+            copied = True
+    if copied:
+        defaults.synchronize()
+    return copied
+
+
+def app_preferences():
+    if NSBundle.mainBundle().bundleIdentifier() == PREFERENCES_DOMAIN:
+        return NSUserDefaults.standardUserDefaults()
+    return NSUserDefaults.alloc().initWithSuiteName_(PREFERENCES_DOMAIN)
+
+
+def shortcut_title(binding):
+    if binding is None:
+        return None
+    _, modifiers, key = binding
+    return ("⌃" if modifiers & CONTROL else "") + ("⌥" if modifiers & OPTION else "") + ("⇧" if modifiers & SHIFT else "") + ("⌘" if modifiers & COMMAND else "") + key
+
+
+def shortcut_from_event(event):
+    key_code = event.keyCode()
+    if key_code == 53:
+        return "cancel"
+    if key_code in (51, 117) and not event.modifierFlags() & (
+        NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption
+    ):
+        return None
+    modifiers = 0
+    for cocoa_flag, carbon_flag in (
+        (NSEventModifierFlagCommand, COMMAND),
+        (NSEventModifierFlagControl, CONTROL),
+        (NSEventModifierFlagOption, OPTION),
+        (NSEventModifierFlagShift, SHIFT),
+    ):
+        if event.modifierFlags() & cocoa_flag:
+            modifiers |= carbon_flag
+    if not modifiers & (COMMAND | CONTROL | OPTION):
+        return "invalid"
+    key = event.charactersIgnoringModifiers() or ""
+    special = {"\r": "Return", "\t": "Tab", " ": "Space", "\x7f": "Delete",
+               "\uf700": "↑", "\uf701": "↓", "\uf702": "←", "\uf703": "→"}
+    key = special.get(key, key.upper() if len(key) == 1 and key.isalpha() else key)
+    if not key or len(key) > 12:
+        return "invalid"
+    return (key_code, modifiers, key)
 
 
 def smoke_stage(name):
@@ -151,10 +260,8 @@ class EventHotKeyID(ctypes.Structure):
 
 class GlobalHotKeys:
     SIGNATURE = fourcc("RMSK")
-    MODIFIERS = (1 << 8) | (1 << 11) | (1 << 12)  # Command, Option, Control.
-    KEY_CODES = {1: 0x21, 2: 0x1E, 3: 0x2A}  # [, ], backslash.
 
-    def __init__(self, on_press):
+    def __init__(self, on_press, shortcuts):
         self.on_press = on_press
         self.carbon = ctypes.CDLL(
             "/System/Library/Frameworks/Carbon.framework/Frameworks/HIToolbox.framework/HIToolbox"
@@ -165,6 +272,7 @@ class GlobalHotKeys:
         self.callback = callback_type(self._handle_event)
         self.handler_ref = ctypes.c_void_p()
         self.hotkey_refs = []
+        self.failed_identifiers = []
 
         self.carbon.GetApplicationEventTarget.restype = ctypes.c_void_p
         self.carbon.InstallEventHandler.argtypes = [
@@ -195,17 +303,20 @@ class GlobalHotKeys:
         if status != 0:
             raise RuntimeError("Cannot install hotkey handler: %d" % status)
 
-        for identifier, key_code in self.KEY_CODES.items():
+        for identifier, binding in shortcuts.items():
+            if binding is None:
+                continue
+            key_code, modifiers, _ = binding
             hotkey_ref = ctypes.c_void_p()
             status = self.carbon.RegisterEventHotKey(
-                key_code, self.MODIFIERS,
+                key_code, modifiers,
                 EventHotKeyID(self.SIGNATURE, identifier),
                 target, 1, ctypes.byref(hotkey_ref),
             )
             if status != 0:
-                self.close()
-                raise RuntimeError("Cannot register hotkey %d: %d" % (identifier, status))
-            self.hotkey_refs.append(hotkey_ref)
+                self.failed_identifiers.append(identifier)
+            else:
+                self.hotkey_refs.append(hotkey_ref)
 
     def _handle_event(self, next_handler, event, user_data):
         hotkey = EventHotKeyID()
@@ -435,7 +546,8 @@ class ReadMaskApp(NSObject):
             self.width_ratio = 0.75
             self.height_ratio = 0.15
             self.opacity = 0.5
-            self.language = "zh"
+            self.language = preferred_ui_language(NSLocale.preferredLanguages())
+            self.shortcuts = dict(DEFAULT_SHORTCUTS)
             self.anchor_sizes = {"move": DEFAULT_ANCHOR_SIZE,
                                  "resize": DEFAULT_RESIZE_ANCHOR_SIZE}
             self.anchor_transparencies = {"move": DEFAULT_ANCHOR_TRANSPARENCY,
@@ -447,16 +559,30 @@ class ReadMaskApp(NSObject):
             self.opacity_panel = None
             self.controls = {}
             self.hotkeys = None
+            self.hotkey_errors = []
+            self.shortcut_monitor = None
+            self.recording_shortcut = None
+            self.shortcut_feedback = None
             self.drag_kind = None
             self.drag_focus_point = None
-            self.preferences = NSUserDefaults.standardUserDefaults()
+            self.preferences = app_preferences()
             if "--smoke" not in sys.argv:
+                self._migrate_legacy_preferences()
+                self.first_launch = not has_saved_preferences(self.preferences)
                 self._load_preferences()
+            else:
+                self.first_launch = False
         return self
 
     @objc.python_method
     def _text(self, key):
         return UI_TEXT[self.language][key]
+
+    @objc.python_method
+    def _migrate_legacy_preferences(self):
+        legacy = (NSUserDefaults.standardUserDefaults()
+                  .persistentDomainForName_(LEGACY_SOURCE_DOMAIN) or {})
+        migrate_legacy_preferences(self.preferences, legacy)
 
     @objc.python_method
     def _load_preferences(self):
@@ -505,6 +631,19 @@ class ReadMaskApp(NSObject):
                 self.anchor_transparencies[kind] = min(
                     0.9, max(0.0, defaults.doubleForKey_(transparency_key))
                 )
+        for identifier in DEFAULT_SHORTCUTS:
+            prefix = "shortcut.%d." % identifier
+            if defaults.objectForKey_(prefix + "enabled") is None:
+                continue
+            if not defaults.boolForKey_(prefix + "enabled"):
+                self.shortcuts[identifier] = None
+            elif defaults.objectForKey_(prefix + "keyCode") is not None:
+                self.shortcuts[identifier] = (
+                    defaults.integerForKey_(prefix + "keyCode"),
+                    defaults.integerForKey_(prefix + "modifiers"),
+                    defaults.stringForKey_(prefix + "keyLabel") or
+                    DEFAULT_SHORTCUTS[identifier][2],
+                )
 
     @objc.python_method
     def _save_preferences(self):
@@ -517,6 +656,7 @@ class ReadMaskApp(NSObject):
         defaults.setDouble_forKey_(self.height_ratio, "heightRatio")
         defaults.setDouble_forKey_(self.opacity, "opacity")
         defaults.setObject_forKey_(self.language, "language")
+        defaults.setBool_forKey_(True, "hasLaunched")
         for kind in ("move", "resize"):
             defaults.setDouble_forKey_(self.anchor_sizes[kind], kind + "AnchorSize")
             defaults.setDouble_forKey_(
@@ -524,6 +664,14 @@ class ReadMaskApp(NSObject):
             )
         if self.fixed_point is not None:
             defaults.setObject_forKey_(list(self.fixed_point), "fixedPoint")
+        for identifier, binding in self.shortcuts.items():
+            prefix = "shortcut.%d." % identifier
+            defaults.setBool_forKey_(binding is not None, prefix + "enabled")
+            if binding is not None:
+                key_code, modifiers, key_label = binding
+                defaults.setInteger_forKey_(key_code, prefix + "keyCode")
+                defaults.setInteger_forKey_(modifiers, prefix + "modifiers")
+                defaults.setObject_forKey_(key_label, prefix + "keyLabel")
         defaults.synchronize()
 
     def applicationDidFinishLaunching_(self, notification):
@@ -535,7 +683,7 @@ class ReadMaskApp(NSObject):
         self._make_anchors()
         self._make_opacity_control()
         self._rebuild_overlays()
-        self.hotkeys = GlobalHotKeys(self._perform_hotkey)
+        self._register_hotkeys()
         NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
             self, "screensChanged:", NSApplicationDidChangeScreenParametersNotification, None
         )
@@ -546,6 +694,27 @@ class ReadMaskApp(NSObject):
             NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 0.2, self, "smokeTest:", None, False
             )
+        else:
+            if self.hotkey_errors:
+                self.controls["tabs"].selectTabViewItem_(self.tab_items["shortcuts"])
+            if self.first_launch or self.hotkey_errors:
+                self.showSettings_(None)
+            self.preferences.setBool_forKey_(True, "hasLaunched")
+            self.preferences.synchronize()
+
+    @objc.python_method
+    def _register_hotkeys(self):
+        if self.hotkeys is not None:
+            self.hotkeys.close()
+            self.hotkeys = None
+        try:
+            self.hotkeys = GlobalHotKeys(self._perform_hotkey, self.shortcuts)
+            self.hotkey_errors = self.hotkeys.failed_identifiers
+        except RuntimeError:
+            self.hotkey_errors = [identifier for identifier, binding in self.shortcuts.items()
+                                  if binding is not None]
+        if "shortcut_warning" in self.controls:
+            self._refresh_shortcut_display()
 
     @objc.python_method
     def _make_status_item(self):
@@ -567,7 +736,7 @@ class ReadMaskApp(NSObject):
     @objc.python_method
     def _make_settings_window(self):
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            rect(0, 0, 400, 600),
+            rect(0, 0, 420, 450),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
@@ -576,50 +745,94 @@ class ReadMaskApp(NSObject):
         self.window.setLevel_(NSFloatingWindowLevel + 1)
         self.window.center()
         self.window.setReleasedWhenClosed_(False)
+        self.window.setDelegate_(self)
         content = self.window.contentView()
 
+        tabs = NSTabView.alloc().initWithFrame_(rect(10, 48, 400, 390))
+        content.addSubview_(tabs)
+        self.controls["tabs"] = tabs
+        self.tab_items = {}
+        tab_views = {}
+        for key in ("reading", "handles", "shortcuts"):
+            item = NSTabViewItem.alloc().initWithIdentifier_(key)
+            item.setLabel_(self._text(key + "_tab"))
+            view = NSView.alloc().initWithFrame_(rect(0, 0, 392, 350))
+            item.setView_(view)
+            tabs.addTabViewItem_(item)
+            self.tab_items[key] = item
+            tab_views[key] = view
+        tabs.selectTabViewItem_(self.tab_items["reading"])
+        tabs.setDelegate_(self)
+        reading = tab_views["reading"]
+        handles = tab_views["handles"]
+        shortcuts = tab_views["shortcuts"]
+
         self.controls["enabled"] = self._checkbox(
-            content, "enabled", 560, self.enabled, "toggleEnabled:"
+            reading, "enabled", 300, self.enabled, "toggleEnabled:"
         )
-        self._shortcut_label(content, "⌃⌥⌘[", 560)
         self.controls["follow"] = self._checkbox(
-            content, "follow", 530, self.follows_mouse, "toggleFollow:"
+            reading, "follow", 268, self.follows_mouse, "toggleFollow:"
         )
-        self._shortcut_label(content, "⌃⌥⌘]", 530)
-        move = NSButton.alloc().initWithFrame_(rect(18, 497, 210, 26))
+        move = NSButton.alloc().initWithFrame_(rect(18, 229, 210, 26))
         move.setTitle_(self._text("move"))
         move.setTarget_(self)
         move.setAction_("moveToMouse:")
-        content.addSubview_(move)
+        reading.addSubview_(move)
         self.controls["move"] = move
-        self._shortcut_label(content, "⌃⌥⌘\\", 500)
 
         self.controls["width"] = self._slider(
-            content, "width", 445, 0.2, 1.0, self.width_ratio, "widthChanged:"
+            reading, "width", 165, 0.2, 1.0, self.width_ratio, "widthChanged:"
         )
         self.controls["height"] = self._slider(
-            content, "height", 380, MIN_HEIGHT_RATIO, 1.0,
+            reading, "height", 105, MIN_HEIGHT_RATIO, 1.0,
             self.height_ratio, "heightChanged:"
         )
         self.controls["opacity"] = self._slider(
-            content, "opacity", 315, 0.0, 1.0, self.opacity, "opacityChanged:"
+            reading, "opacity", 45, 0.0, 1.0, self.opacity, "opacityChanged:"
         )
         self.controls["move_size"] = self._slider(
-            content, "move_size", 250, 24, 96,
+            handles, "move_size", 265, 24, 96,
             self.anchor_sizes["move"], "moveSizeChanged:"
         )
         self.controls["move_opacity"] = self._slider(
-            content, "move_opacity", 185, 0.0, 0.9,
+            handles, "move_opacity", 195, 0.0, 0.9,
             self.anchor_transparencies["move"], "moveOpacityChanged:"
         )
         self.controls["resize_size"] = self._slider(
-            content, "resize_size", 120, 24, 96,
+            handles, "resize_size", 125, 24, 96,
             self.anchor_sizes["resize"], "resizeSizeChanged:"
         )
         self.controls["resize_opacity"] = self._slider(
-            content, "resize_opacity", 55, 0.0, 0.9,
+            handles, "resize_opacity", 55, 0.0, 0.9,
             self.anchor_transparencies["resize"], "resizeOpacityChanged:"
         )
+        for identifier, y in ((1, 265), (2, 195), (3, 125)):
+            action = SHORTCUT_ACTIONS[identifier]
+            label = NSTextField.labelWithString_(self._text(action))
+            label.setFrame_(rect(18, y + 3, 180, 22))
+            shortcuts.addSubview_(label)
+            self.controls["shortcut_%d_title" % identifier] = label
+            button = NSButton.alloc().initWithFrame_(rect(205, y, 172, 28))
+            button.setTitle_(shortcut_title(self.shortcuts[identifier]) or self._text("shortcut_none"))
+            button.setToolTip_(self._text("shortcut_record_tooltip"))
+            button.setTag_(identifier)
+            button.setTarget_(self)
+            button.setAction_("recordShortcut:")
+            shortcuts.addSubview_(button)
+            self.controls["shortcut_%d" % identifier] = button
+        warning = NSTextField.labelWithString_("")
+        warning.setFrame_(rect(18, 55, 360, 52))
+        warning.setTextColor_(NSColor.systemRedColor())
+        warning.setUsesSingleLineMode_(False)
+        warning.cell().setWraps_(True)
+        shortcuts.addSubview_(warning)
+        self.controls["shortcut_warning"] = warning
+        reset = NSButton.alloc().initWithFrame_(rect(18, 15, 190, 28))
+        reset.setTitle_(self._text("shortcut_reset"))
+        reset.setTarget_(self)
+        reset.setAction_("resetShortcuts:")
+        shortcuts.addSubview_(reset)
+        self.controls["shortcut_reset"] = reset
         language_label = NSTextField.labelWithString_(self._text("language"))
         language_label.setFrame_(rect(18, 15, 82, 20))
         content.addSubview_(language_label)
@@ -633,13 +846,14 @@ class ReadMaskApp(NSObject):
         language.setAction_("languageChanged:")
         content.addSubview_(language)
         self.controls["language"] = language
-        quit_button = NSButton.alloc().initWithFrame_(rect(310, 12, 70, 26))
+        quit_button = NSButton.alloc().initWithFrame_(rect(330, 12, 70, 26))
         quit_button.setTitle_(self._text("quit"))
         quit_button.setTarget_(self)
         quit_button.setAction_("quit:")
         content.addSubview_(quit_button)
         self.controls["quit"] = quit_button
         self._sync_labels()
+        self._refresh_shortcut_display()
 
     @objc.python_method
     def _checkbox(self, content, key, y, checked, action):
@@ -651,13 +865,6 @@ class ReadMaskApp(NSObject):
         button.setAction_(action)
         content.addSubview_(button)
         return button
-
-    @objc.python_method
-    def _shortcut_label(self, content, title, y):
-        label = NSTextField.labelWithString_(title)
-        label.setFrame_(rect(280, y + 2, 100, 20))
-        label.setAlignment_(2)
-        content.addSubview_(label)
 
     @objc.python_method
     def _slider(self, content, key, y, minimum, maximum, value, action):
@@ -712,13 +919,38 @@ class ReadMaskApp(NSObject):
             button.setImage_(icon)
         for key in ("enabled", "follow", "move", "quit"):
             self.controls[key].setTitle_(self._text(key))
+        for key, item in self.tab_items.items():
+            item.setLabel_(self._text(key + "_tab"))
         self.controls["language_label"].setStringValue_(self._text("language"))
         for key in ("width", "height", "opacity", "move_size", "move_opacity",
                     "resize_size", "resize_opacity"):
             self.controls[key + "_title"].setStringValue_(self._text(key))
+        for identifier, action in SHORTCUT_ACTIONS.items():
+            self.controls["shortcut_%d_title" % identifier].setStringValue_(self._text(action))
+            self.controls["shortcut_%d" % identifier].setToolTip_(self._text("shortcut_record_tooltip"))
+        self.controls["shortcut_reset"].setTitle_(self._text("shortcut_reset"))
+        self._refresh_shortcut_display()
         for kind, panel in self.anchor_panels.items():
             panel.contentView().setToolTip_(self._text(kind + "_tooltip"))
         self.controls["floating_opacity"].setToolTip_(self._text("opacity"))
+
+    @objc.python_method
+    def _refresh_shortcut_display(self):
+        for identifier, binding in self.shortcuts.items():
+            title = (self._text("shortcut_record") if self.recording_shortcut == identifier
+                     else shortcut_title(binding) or self._text("shortcut_none"))
+            self.controls["shortcut_%d" % identifier].setTitle_(title)
+        if self.shortcut_feedback:
+            message = self._text(self.shortcut_feedback)
+        elif self.recording_shortcut is not None:
+            message = self._text("shortcut_invalid")
+        elif self.hotkey_errors:
+            keys = ", ".join(shortcut_title(self.shortcuts[identifier])
+                             for identifier in self.hotkey_errors)
+            message = self._text("shortcut_unavailable").format(keys=keys)
+        else:
+            message = ""
+        self.controls["shortcut_warning"].setStringValue_(message)
 
     @objc.python_method
     def _make_anchors(self):
@@ -986,6 +1218,79 @@ class ReadMaskApp(NSObject):
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         self.window.makeKeyAndOrderFront_(None)
 
+    def windowWillClose_(self, notification):
+        if self.recording_shortcut is not None:
+            self._stop_recording_shortcut()
+            self._register_hotkeys()
+
+    def windowDidResignKey_(self, notification):
+        if self.recording_shortcut is not None:
+            self._stop_recording_shortcut()
+            self._register_hotkeys()
+
+    def tabView_didSelectTabViewItem_(self, tab_view, item):
+        if self.recording_shortcut is not None and item != self.tab_items["shortcuts"]:
+            self._stop_recording_shortcut()
+            self._register_hotkeys()
+
+    def recordShortcut_(self, sender):
+        self._stop_recording_shortcut()
+        if self.hotkeys is not None:
+            self.hotkeys.close()
+            self.hotkeys = None
+        self.recording_shortcut = sender.tag()
+        self.shortcut_feedback = None
+
+        def capture(event):
+            self._record_shortcut_event(event)
+            return None
+
+        self.shortcut_monitor = NSEvent.addLocalMonitorForEventsMatchingMask_handler_(
+            NSEventMaskKeyDown, capture
+        )
+        self._refresh_shortcut_display()
+        self.window.makeKeyAndOrderFront_(None)
+
+    @objc.python_method
+    def _record_shortcut_event(self, event):
+        binding = shortcut_from_event(event)
+        if binding == "cancel":
+            self._stop_recording_shortcut()
+            self._register_hotkeys()
+            return
+        if binding == "invalid":
+            self.shortcut_feedback = "shortcut_invalid"
+            self._refresh_shortcut_display()
+            return
+        if binding is not None and any(
+            other != self.recording_shortcut and saved is not None
+            and saved[:2] == binding[:2]
+            for other, saved in self.shortcuts.items()
+        ):
+            self.shortcut_feedback = "shortcut_duplicate"
+            self._refresh_shortcut_display()
+            return
+        self.shortcuts[self.recording_shortcut] = binding
+        self._stop_recording_shortcut()
+        self._register_hotkeys()
+        self._save_preferences()
+
+    @objc.python_method
+    def _stop_recording_shortcut(self):
+        if self.shortcut_monitor is not None:
+            NSEvent.removeMonitor_(self.shortcut_monitor)
+            self.shortcut_monitor = None
+        self.recording_shortcut = None
+        self.shortcut_feedback = None
+        if "shortcut_warning" in self.controls:
+            self._refresh_shortcut_display()
+
+    def resetShortcuts_(self, sender):
+        self._stop_recording_shortcut()
+        self.shortcuts = dict(DEFAULT_SHORTCUTS)
+        self._register_hotkeys()
+        self._save_preferences()
+
     def applicationShouldHandleReopen_hasVisibleWindows_(self, application, has_visible_windows):
         self.showSettings_(None)
         return True
@@ -1107,14 +1412,38 @@ class ReadMaskApp(NSObject):
         NSApplication.sharedApplication().terminate_(None)
 
     def applicationWillTerminate_(self, notification):
+        self._stop_recording_shortcut()
         if self.hotkeys is not None:
             self.hotkeys.close()
 
     def smokeTest_(self, timer):
         assert NSApplication.sharedApplication().activationPolicy() == NSApplicationActivationPolicyRegular
+        assert self.controls["tabs"].numberOfTabViewItems() == 3
+        assert self.controls["tabs"].selectedTabViewItem() == self.tab_items["reading"]
+        self.controls["tabs"].selectTabViewItem_(self.tab_items["shortcuts"])
+        self.recordShortcut_(self.controls["shortcut_1"])
+        assert self.recording_shortcut == 1 and self.shortcut_monitor is not None
+
+        class RecordedKey:
+            def keyCode(self):
+                return 15
+
+            def modifierFlags(self):
+                return (NSEventModifierFlagControl | NSEventModifierFlagOption
+                        | NSEventModifierFlagCommand)
+
+            def charactersIgnoringModifiers(self):
+                return "r"
+
+        self._record_shortcut_event(RecordedKey())
+        assert self.shortcuts[1] == (15, CONTROL | OPTION | COMMAND, "R")
+        assert self.recording_shortcut is None and self.shortcut_monitor is None
+        self.resetShortcuts_(None)
+        assert self.shortcuts == DEFAULT_SHORTCUTS
         self.controls["language"].selectItemAtIndex_(1)
         self.languageChanged_(self.controls["language"])
         assert self.window.title() == "ReadMask"
+        assert self.tab_items["shortcuts"].label() == "Shortcuts"
         assert self.controls["resize_opacity_title"].stringValue() == "Resize handle transparency"
         assert self.anchor_panels["move"].contentView().toolTip() == "Drag focus area"
         self.controls["language"].selectItemAtIndex_(0)
