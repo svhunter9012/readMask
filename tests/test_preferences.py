@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from AppKit import NSScreen, NSUserDefaults
 
-from readmask import ReadMaskApp, focus_rectangle
+from readmask import ReadMaskApp, UI_TEXT, focus_rectangle
 
 
 class PreferencesTest(unittest.TestCase):
@@ -44,6 +44,7 @@ class PreferencesTest(unittest.TestCase):
             first.width_ratio = 0.42
             first.height_ratio = 0.23
             first.opacity = 0.64
+            first.language = "en"
             first.anchor_sizes = {"move": 60, "resize": 36}
             first.anchor_transparencies = {"move": 0.7, "resize": 0.3}
             first.fixed_point = (123.5, 456.5)
@@ -57,11 +58,15 @@ class PreferencesTest(unittest.TestCase):
             self.assertAlmostEqual(second.width_ratio, 0.42)
             self.assertAlmostEqual(second.height_ratio, 0.23)
             self.assertAlmostEqual(second.opacity, 0.64)
+            self.assertEqual(second.language, "en")
             self.assertEqual(second.anchor_sizes, {"move": 60, "resize": 36})
             self.assertEqual(second.anchor_transparencies, {"move": 0.7, "resize": 0.3})
             self.assertEqual(second.fixed_point, (123.5, 456.5))
         finally:
             defaults.removePersistentDomainForName_(suite)
+
+    def test_languages_have_the_same_ui_strings(self):
+        self.assertEqual(set(UI_TEXT["zh"]), set(UI_TEXT["en"]))
 
 
 if __name__ == "__main__":

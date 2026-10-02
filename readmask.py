@@ -22,6 +22,7 @@ from AppKit import (
     NSNotificationCenter,
     NSObject,
     NSPanel,
+    NSPopUpButton,
     NSScreen,
     NSSlider,
     NSStatusBar,
@@ -52,6 +53,47 @@ MOVE_ANCHOR_ASPECT = 2.5
 MIN_HEIGHT_RATIO = 0.05
 FLOATING_OPACITY_WIDTH = 164
 FLOATING_OPACITY_HEIGHT = 36
+
+UI_TEXT = {
+    "zh": {
+        "app_name": "阅读尺",
+        "settings_tooltip": "阅读尺设置",
+        "enabled": "启用盖板",
+        "follow": "跟随鼠标",
+        "move": "移到鼠标位置",
+        "width": "阅读区宽度",
+        "height": "阅读区高度",
+        "opacity": "遮罩深度",
+        "move_size": "移动锚点大小",
+        "move_opacity": "移动锚点透明度",
+        "resize_size": "缩放锚点大小",
+        "resize_opacity": "缩放锚点透明度",
+        "language": "语言",
+        "quit": "退出",
+        "move_tooltip": "拖动阅读区",
+        "resize_tooltip": "拖动调整阅读区大小",
+        "started": "阅读尺已启动，点击菜单栏图标打开设置。",
+    },
+    "en": {
+        "app_name": "ReadMask",
+        "settings_tooltip": "ReadMask settings",
+        "enabled": "Enable mask",
+        "follow": "Follow pointer",
+        "move": "Move to pointer",
+        "width": "Focus width",
+        "height": "Focus height",
+        "opacity": "Mask depth",
+        "move_size": "Move handle size",
+        "move_opacity": "Move handle transparency",
+        "resize_size": "Resize handle size",
+        "resize_opacity": "Resize handle transparency",
+        "language": "Language",
+        "quit": "Quit",
+        "move_tooltip": "Drag focus area",
+        "resize_tooltip": "Drag to resize focus area",
+        "started": "ReadMask is running. Click the menu bar icon to open settings.",
+    },
+}
 
 
 def rect(x, y, width, height):
@@ -393,6 +435,7 @@ class ReadMaskApp(NSObject):
             self.width_ratio = 0.75
             self.height_ratio = 0.15
             self.opacity = 0.5
+            self.language = "zh"
             self.anchor_sizes = {"move": DEFAULT_ANCHOR_SIZE,
                                  "resize": DEFAULT_RESIZE_ANCHOR_SIZE}
             self.anchor_transparencies = {"move": DEFAULT_ANCHOR_TRANSPARENCY,
@@ -412,8 +455,15 @@ class ReadMaskApp(NSObject):
         return self
 
     @objc.python_method
+    def _text(self, key):
+        return UI_TEXT[self.language][key]
+
+    @objc.python_method
     def _load_preferences(self):
         defaults = self.preferences
+        language = defaults.stringForKey_("language")
+        if language in UI_TEXT:
+            self.language = language
         for key, attribute in (("enabled", "enabled"),
                                ("followsMouse", "follows_mouse")):
             if defaults.objectForKey_(key) is not None:
@@ -466,6 +516,7 @@ class ReadMaskApp(NSObject):
         defaults.setDouble_forKey_(self.width_ratio, "widthRatio")
         defaults.setDouble_forKey_(self.height_ratio, "heightRatio")
         defaults.setDouble_forKey_(self.opacity, "opacity")
+        defaults.setObject_forKey_(self.language, "language")
         for kind in ("move", "resize"):
             defaults.setDouble_forKey_(self.anchor_sizes[kind], kind + "AnchorSize")
             defaults.setDouble_forKey_(
@@ -503,40 +554,40 @@ class ReadMaskApp(NSObject):
         )
         button = self.status_item.button()
         icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            "text.viewfinder", "阅读盖板"
+            "text.viewfinder", self._text("app_name")
         )
         if icon is not None:
             button.setImage_(icon)
         else:
             button.setTitle_("▣")
-        button.setToolTip_("阅读盖板设置")
+        button.setToolTip_(self._text("settings_tooltip"))
         button.setTarget_(self)
         button.setAction_("showSettings:")
 
     @objc.python_method
     def _make_settings_window(self):
         self.window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-            rect(0, 0, 340, 600),
+            rect(0, 0, 400, 600),
             NSWindowStyleMaskTitled | NSWindowStyleMaskClosable,
             NSBackingStoreBuffered,
             False,
         )
-        self.window.setTitle_("阅读盖板")
+        self.window.setTitle_(self._text("app_name"))
         self.window.setLevel_(NSFloatingWindowLevel + 1)
         self.window.center()
         self.window.setReleasedWhenClosed_(False)
         content = self.window.contentView()
 
         self.controls["enabled"] = self._checkbox(
-            content, "启用盖板", 560, self.enabled, "toggleEnabled:"
+            content, "enabled", 560, self.enabled, "toggleEnabled:"
         )
         self._shortcut_label(content, "⌃⌥⌘[", 560)
         self.controls["follow"] = self._checkbox(
-            content, "跟随鼠标", 530, self.follows_mouse, "toggleFollow:"
+            content, "follow", 530, self.follows_mouse, "toggleFollow:"
         )
         self._shortcut_label(content, "⌃⌥⌘]", 530)
-        move = NSButton.alloc().initWithFrame_(rect(18, 497, 160, 26))
-        move.setTitle_("移到鼠标位置")
+        move = NSButton.alloc().initWithFrame_(rect(18, 497, 210, 26))
+        move.setTitle_(self._text("move"))
         move.setTarget_(self)
         move.setAction_("moveToMouse:")
         content.addSubview_(move)
@@ -544,43 +595,57 @@ class ReadMaskApp(NSObject):
         self._shortcut_label(content, "⌃⌥⌘\\", 500)
 
         self.controls["width"] = self._slider(
-            content, "阅读区宽度", 445, 0.2, 1.0, self.width_ratio, "widthChanged:"
+            content, "width", 445, 0.2, 1.0, self.width_ratio, "widthChanged:"
         )
         self.controls["height"] = self._slider(
-            content, "阅读区高度", 380, MIN_HEIGHT_RATIO, 1.0,
+            content, "height", 380, MIN_HEIGHT_RATIO, 1.0,
             self.height_ratio, "heightChanged:"
         )
         self.controls["opacity"] = self._slider(
-            content, "遮罩深度", 315, 0.0, 1.0, self.opacity, "opacityChanged:"
+            content, "opacity", 315, 0.0, 1.0, self.opacity, "opacityChanged:"
         )
         self.controls["move_size"] = self._slider(
-            content, "移动锚点大小", 250, 24, 96,
+            content, "move_size", 250, 24, 96,
             self.anchor_sizes["move"], "moveSizeChanged:"
         )
         self.controls["move_opacity"] = self._slider(
-            content, "移动锚点透明度", 185, 0.0, 0.9,
+            content, "move_opacity", 185, 0.0, 0.9,
             self.anchor_transparencies["move"], "moveOpacityChanged:"
         )
         self.controls["resize_size"] = self._slider(
-            content, "缩放锚点大小", 120, 24, 96,
+            content, "resize_size", 120, 24, 96,
             self.anchor_sizes["resize"], "resizeSizeChanged:"
         )
         self.controls["resize_opacity"] = self._slider(
-            content, "缩放锚点透明度", 55, 0.0, 0.9,
+            content, "resize_opacity", 55, 0.0, 0.9,
             self.anchor_transparencies["resize"], "resizeOpacityChanged:"
         )
-        quit_button = NSButton.alloc().initWithFrame_(rect(250, 12, 70, 26))
-        quit_button.setTitle_("退出")
+        language_label = NSTextField.labelWithString_(self._text("language"))
+        language_label.setFrame_(rect(18, 15, 82, 20))
+        content.addSubview_(language_label)
+        self.controls["language_label"] = language_label
+        language = NSPopUpButton.alloc().initWithFrame_pullsDown_(
+            rect(108, 10, 152, 26), False
+        )
+        language.addItemsWithTitles_(["中文", "English"])
+        language.selectItemAtIndex_(0 if self.language == "zh" else 1)
+        language.setTarget_(self)
+        language.setAction_("languageChanged:")
+        content.addSubview_(language)
+        self.controls["language"] = language
+        quit_button = NSButton.alloc().initWithFrame_(rect(310, 12, 70, 26))
+        quit_button.setTitle_(self._text("quit"))
         quit_button.setTarget_(self)
         quit_button.setAction_("quit:")
         content.addSubview_(quit_button)
+        self.controls["quit"] = quit_button
         self._sync_labels()
 
     @objc.python_method
-    def _checkbox(self, content, title, y, checked, action):
-        button = NSButton.alloc().initWithFrame_(rect(18, y, 180, 24))
+    def _checkbox(self, content, key, y, checked, action):
+        button = NSButton.alloc().initWithFrame_(rect(18, y, 220, 24))
         button.setButtonType_(NSSwitchButton)
-        button.setTitle_(title)
+        button.setTitle_(self._text(key))
         button.setState_(NSControlStateValueOn if checked else 0)
         button.setTarget_(self)
         button.setAction_(action)
@@ -590,20 +655,21 @@ class ReadMaskApp(NSObject):
     @objc.python_method
     def _shortcut_label(self, content, title, y):
         label = NSTextField.labelWithString_(title)
-        label.setFrame_(rect(220, y + 2, 100, 20))
+        label.setFrame_(rect(280, y + 2, 100, 20))
         label.setAlignment_(2)
         content.addSubview_(label)
 
     @objc.python_method
-    def _slider(self, content, title, y, minimum, maximum, value, action):
-        label = NSTextField.labelWithString_(title)
-        label.setFrame_(rect(18, y + 25, 170, 20))
+    def _slider(self, content, key, y, minimum, maximum, value, action):
+        label = NSTextField.labelWithString_(self._text(key))
+        label.setFrame_(rect(18, y + 25, 240, 20))
         content.addSubview_(label)
+        self.controls[key + "_title"] = label
         value_label = NSTextField.labelWithString_("")
-        value_label.setFrame_(rect(225, y + 25, 95, 20))
+        value_label.setFrame_(rect(280, y + 25, 100, 20))
         value_label.setAlignment_(2)
         content.addSubview_(value_label)
-        slider = NSSlider.alloc().initWithFrame_(rect(18, y, 302, 24))
+        slider = NSSlider.alloc().initWithFrame_(rect(18, y, 362, 24))
         slider.setMinValue_(minimum)
         slider.setMaxValue_(maximum)
         slider.setDoubleValue_(value)
@@ -611,28 +677,48 @@ class ReadMaskApp(NSObject):
         slider.setTarget_(self)
         slider.setAction_(action)
         content.addSubview_(slider)
-        self.controls[title + "_label"] = value_label
+        self.controls[key + "_label"] = value_label
         return slider
 
     @objc.python_method
     def _sync_labels(self):
-        self.controls["阅读区宽度_label"].setStringValue_(
+        self.controls["width_label"].setStringValue_(
             "%d%%" % round(self.width_ratio * 100)
         )
-        self.controls["阅读区高度_label"].setStringValue_(
+        self.controls["height_label"].setStringValue_(
             "%d%%" % round(self.height_ratio * 100)
         )
-        self.controls["遮罩深度_label"].setStringValue_(
+        self.controls["opacity_label"].setStringValue_(
             "%d%%" % round(self.opacity * 100)
         )
-        for kind, title in (("move", "移动"), ("resize", "缩放")):
-            self.controls[title + "锚点大小_label"].setStringValue_(
+        for kind in ("move", "resize"):
+            self.controls[kind + "_size_label"].setStringValue_(
                 "%d×%d pt" % anchor_dimensions(kind, self.anchor_sizes[kind])
             )
-            self.controls[title + "锚点透明度_label"].setStringValue_(
+            self.controls[kind + "_opacity_label"].setStringValue_(
                 "%d%%" % round(self.anchor_transparencies[kind] * 100)
             )
         self.controls["move"].setEnabled_(not self.follows_mouse)
+
+    @objc.python_method
+    def _apply_language(self):
+        self.window.setTitle_(self._text("app_name"))
+        button = self.status_item.button()
+        button.setToolTip_(self._text("settings_tooltip"))
+        icon = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+            "text.viewfinder", self._text("app_name")
+        )
+        if icon is not None:
+            button.setImage_(icon)
+        for key in ("enabled", "follow", "move", "quit"):
+            self.controls[key].setTitle_(self._text(key))
+        self.controls["language_label"].setStringValue_(self._text("language"))
+        for key in ("width", "height", "opacity", "move_size", "move_opacity",
+                    "resize_size", "resize_opacity"):
+            self.controls[key + "_title"].setStringValue_(self._text(key))
+        for kind, panel in self.anchor_panels.items():
+            panel.contentView().setToolTip_(self._text(kind + "_tooltip"))
+        self.controls["floating_opacity"].setToolTip_(self._text("opacity"))
 
     @objc.python_method
     def _make_anchors(self):
@@ -657,7 +743,7 @@ class ReadMaskApp(NSObject):
             view.setFrame_(rect(0, 0, *anchor_dimensions(kind, self.anchor_sizes[kind])))
             view.owner = self
             view.kind = kind
-            view.setToolTip_("拖动阅读区" if kind == "move" else "拖动调整阅读区大小")
+            view.setToolTip_(self._text(kind + "_tooltip"))
             tracking = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
                 view.bounds(),
                 NSTrackingMouseEnteredAndExited
@@ -706,7 +792,7 @@ class ReadMaskApp(NSObject):
         )
         slider.owner = self
         slider.setDoubleValue_(self.opacity)
-        slider.setToolTip_("遮罩深度")
+        slider.setToolTip_(self._text("opacity"))
         background.addSubview_(slider)
         panel.setContentView_(background)
         self.opacity_panel = panel
@@ -947,6 +1033,11 @@ class ReadMaskApp(NSObject):
     def moveToMouse_(self, sender):
         self._move_to_mouse()
 
+    def languageChanged_(self, sender):
+        self.language = ("zh", "en")[sender.indexOfSelectedItem()]
+        self._apply_language()
+        self._save_preferences()
+
     @objc.python_method
     def _move_to_mouse(self):
         self.fixed_point = NSEvent.mouseLocation()
@@ -1021,6 +1112,14 @@ class ReadMaskApp(NSObject):
 
     def smokeTest_(self, timer):
         assert NSApplication.sharedApplication().activationPolicy() == NSApplicationActivationPolicyRegular
+        self.controls["language"].selectItemAtIndex_(1)
+        self.languageChanged_(self.controls["language"])
+        assert self.window.title() == "ReadMask"
+        assert self.controls["resize_opacity_title"].stringValue() == "Resize handle transparency"
+        assert self.anchor_panels["move"].contentView().toolTip() == "Drag focus area"
+        self.controls["language"].selectItemAtIndex_(0)
+        self.languageChanged_(self.controls["language"])
+        assert self.window.title() == "阅读尺"
         assert self.overlays
         assert self.hotkeys is not None and len(self.hotkeys.hotkey_refs) == 3
         assert all(panel.isVisible() for panel, _ in self.overlays)
@@ -1130,5 +1229,5 @@ if __name__ == "__main__":
     app = NSApplication.sharedApplication()
     delegate = ReadMaskApp.alloc().init()
     app.setDelegate_(delegate)
-    print("阅读盖板已启动，点击菜单栏图标打开设置。", flush=True)
+    print(delegate._text("started"), flush=True)
     app.run()
