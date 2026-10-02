@@ -26,6 +26,5 @@ pyinstaller --noconfirm --clean --windowed --onedir \
     --distpath dist \
     readmask.py
 
-/usr/libexec/PlistBuddy -c 'Add :LSUIElement bool true' dist/ReadMask.app/Contents/Info.plist
 /usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 1.0.0' dist/ReadMask.app/Contents/Info.plist
 codesign --force --deep --sign - dist/ReadMask.app

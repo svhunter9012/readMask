@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from AppKit import (
     NSApplication,
-    NSApplicationActivationPolicyAccessory,
+    NSApplicationActivationPolicyRegular,
     NSApplicationDidChangeScreenParametersNotification,
     NSBackingStoreBuffered,
     NSBezierPath,
@@ -477,7 +477,7 @@ class ReadMaskApp(NSObject):
 
     def applicationDidFinishLaunching_(self, notification):
         NSApplication.sharedApplication().setActivationPolicy_(
-            NSApplicationActivationPolicyAccessory
+            NSApplicationActivationPolicyRegular
         )
         self._make_status_item()
         self._make_settings_window()
@@ -900,6 +900,10 @@ class ReadMaskApp(NSObject):
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         self.window.makeKeyAndOrderFront_(None)
 
+    def applicationShouldHandleReopen_hasVisibleWindows_(self, application, has_visible_windows):
+        self.showSettings_(None)
+        return True
+
     def screensChanged_(self, notification):
         self._rebuild_overlays()
 
@@ -1016,6 +1020,7 @@ class ReadMaskApp(NSObject):
             self.hotkeys.close()
 
     def smokeTest_(self, timer):
+        assert NSApplication.sharedApplication().activationPolicy() == NSApplicationActivationPolicyRegular
         assert self.overlays
         assert self.hotkeys is not None and len(self.hotkeys.hotkey_refs) == 3
         assert all(panel.isVisible() for panel, _ in self.overlays)

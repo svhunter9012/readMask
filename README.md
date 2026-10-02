@@ -16,7 +16,7 @@ readMask 是一个用 Python 编写的 macOS 阅读盖板。它会压暗屏幕�
 
 ## 应用构建与运行
 
-在 macOS 上运行 `./build.sh`，生成 [ReadMask.app](dist/ReadMask.app)。通过 Finder 双击应用即可启动，不会打开终端窗口。应用出现在菜单栏，点击图标打开设置；点击设置窗口中的“退出”结束应用。构建需要 `clang`、`sips` 和 PyInstaller，生成的应用已包含 Python 与 PyObjC 运行环境。
+在 macOS 上运行 `./build.sh`，生成 [ReadMask.app](dist/ReadMask.app)。通过 Finder 双击应用即可启动，不会打开终端窗口。应用会显示在程序坞和菜单栏，点击任一图标可打开设置；点击设置窗口中的“退出”结束应用。构建需要 `clang`、`sips` 和 PyInstaller，生成的应用已包含 Python 与 PyObjC 运行环境。
 
 设置会自动保存，包括盖板开关、跟随状态、阅读区尺寸与位置、遮罩深度，以及两个锚点各自的大小和透明度。下次打开会恢复上次的配置。
 
